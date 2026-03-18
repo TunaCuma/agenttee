@@ -4,7 +4,7 @@ import sys
 import time
 from pathlib import Path
 
-from .compress import strategy_template_dedup, strategy_semantic, strategy_hybrid
+from .compress import strategy_template_dedup, strategy_semantic, strategy_hybrid, strategy_agent, strategy_agent_hybrid
 from .templates import TemplateIndex
 
 
@@ -12,6 +12,8 @@ STRATEGIES = {
     "template_dedup": ("Template-based deduplication", strategy_template_dedup),
     "semantic": ("Semantic compression", strategy_semantic),
     "hybrid": ("Hybrid (semantic + template dedup)", strategy_hybrid),
+    "agent": ("Agent-optimized (smart compression)", strategy_agent),
+    "agent_hybrid": ("Agent + template dedup (max compression)", strategy_agent_hybrid),
 }
 
 
