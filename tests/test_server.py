@@ -5,7 +5,7 @@ import pytest
 from agenttee import store
 from agenttee.server import (
     list_sessions, get_logs, tail, search, get_stats,
-    get_timeline, diff_sessions,
+    get_timeline, diff_sessions, get_traces,
 )
 
 
@@ -173,3 +173,57 @@ class TestDiffSessions:
         _create_session_with_lines("exists", ["hello"])
         result = diff_sessions("exists", "nope")
         assert "not found" in result
+
+
+class TestGetTraces:
+    def test_finds_trace_lines(self):
+        lines = [
+            "INFO server starting",
+            "DEBUG loading config",
+            'AGENTTEE_TRACE [auth] user=42 logged in',
+            "INFO handling request",
+            'AGENTTEE_TRACE [db] query took 150ms',
+            "INFO request complete",
+        ]
+        _create_session_with_lines("svc", lines)
+        result = get_traces(session="svc")
+        assert "2 traces" in result
+        assert "user=42" in result
+        assert "query took 150ms" in result
+        assert "server starting" not in result
+
+    def test_tag_filter(self):
+        lines = [
+            'AGENTTEE_TRACE [auth] login ok',
+            'AGENTTEE_TRACE [db] slow query',
+            'AGENTTEE_TRACE [auth] token refreshed',
+        ]
+        _create_session_with_lines("svc", lines)
+        result = get_traces(session="svc", tag="auth")
+        assert "2 traces" in result
+        assert "login ok" in result
+        assert "token refreshed" in result
+        assert "slow query" not in result
+
+    def test_context_lines(self):
+        lines = [
+            "line before",
+            'AGENTTEE_TRACE [x] hit',
+            "line after",
+        ]
+        _create_session_with_lines("svc", lines)
+        result = get_traces(session="svc", context=1)
+        assert "line before" in result
+        assert "line after" in result
+
+    def test_no_traces(self):
+        _create_session_with_lines("svc", ["INFO normal log", "DEBUG ok"])
+        result = get_traces(session="svc")
+        assert "No AGENTTEE_TRACE" in result
+
+    def test_searches_all_sessions(self):
+        _create_session_with_lines("api", ['AGENTTEE_TRACE [api] req in'])
+        _create_session_with_lines("worker", ['AGENTTEE_TRACE [worker] job done'])
+        result = get_traces()
+        assert "api" in result
+        assert "worker" in result

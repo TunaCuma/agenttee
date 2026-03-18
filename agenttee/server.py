@@ -352,6 +352,94 @@ def diff_sessions(
     return header + "\n" + "\n".join(diff)
 
 
+TRACE_KEYWORD = "AGENTTEE_TRACE"
+
+
+@mcp.tool()
+def get_traces(
+    session: str | None = None,
+    tag: str | None = None,
+    context: int = 0,
+) -> str:
+    """Get trace lines you inserted into the codebase.
+
+    HOW TO USE:
+    1. Add print/log statements with the keyword AGENTTEE_TRACE to the code
+       you want to trace, e.g.:
+         print(f"AGENTTEE_TRACE [checkout] user={user.id} cart={len(items)}")
+         logger.info(f"AGENTTEE_TRACE [db] query took {elapsed}ms")
+    2. Run the service through agenttee:  my_server | agenttee --name api
+    3. Call this tool to retrieve only your trace lines, cutting through
+       all the framework noise.
+
+    Use tags in brackets like [checkout], [db], [auth] to organize traces.
+    The tag parameter filters by these bracket tags.
+
+    Args:
+        session: Session to search. If omitted, searches all sessions.
+        tag: Optional tag filter (e.g., "checkout" matches [checkout]).
+             Case-insensitive.
+        context: Number of surrounding log lines to include around each
+                 trace hit (default 0 — just the trace lines).
+    """
+    sessions_to_search = []
+    if session:
+        sessions_to_search = [session]
+    else:
+        sessions_to_search = [s.name for s in store.list_sessions()]
+
+    if not sessions_to_search:
+        return "No sessions. Pipe output through agenttee to create one."
+
+    results = []
+    total = 0
+
+    for sname in sessions_to_search:
+        tlines = store.read_timestamped(sname)
+        if not tlines:
+            continue
+
+        hits = []
+        for i, tl in enumerate(tlines):
+            clean = strip_ansi(tl.text).strip()
+            if TRACE_KEYWORD not in clean:
+                continue
+            if tag and f"[{tag}]".lower() not in clean.lower():
+                continue
+
+            if context > 0:
+                start = max(0, i - context)
+                end = min(len(tlines), i + context + 1)
+                block = []
+                for j in range(start, end):
+                    c = strip_ansi(tlines[j].text).strip()
+                    prefix = ">>> " if j == i else "    "
+                    block.append(f"{prefix}{c}")
+                hits.append("\n".join(block))
+            else:
+                hits.append(clean)
+            total += 1
+
+        if hits:
+            results.append(f"── {sname} ({len(hits)} traces) ──")
+            results.extend(hits)
+            results.append("")
+
+    if not results:
+        searched = ", ".join(sessions_to_search)
+        hint = f" with tag [{tag}]" if tag else ""
+        return (
+            f"No AGENTTEE_TRACE lines found{hint} in: {searched}\n\n"
+            f"Add trace lines to your code like:\n"
+            f"  print(\"AGENTTEE_TRACE [mytag] value={{val}}\")"
+        )
+
+    header = f"Traces: {total} hits"
+    if tag:
+        header += f" (tag: [{tag}])"
+    return header + "\n\n" + "\n".join(results)
+
+
 def _format_age(timestamp: float) -> str:
     delta = time.time() - timestamp
     if delta < 60:
