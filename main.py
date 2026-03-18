@@ -1,4 +1,4 @@
-"""Run agenttee compression on a log file."""
+"""Run agenttee."""
 from agenttee.cli import main
 
 if __name__ == "__main__":

@@ -1,35 +1,107 @@
-"""CLI entry point for agenttee log compression."""
+"""
+CLI entry point for agenttee.
+
+Three modes:
+  1. Pipe capture:  some_command | agenttee --name myservice
+  2. MCP server:    agenttee serve
+  3. File analysis:  agenttee <logfile> [--stats]
+"""
 
 import sys
-import time
+import os
 from pathlib import Path
-
-from .compress import strategy_template_dedup, strategy_semantic, strategy_hybrid, strategy_agent, strategy_agent_hybrid
-from .templates import TemplateIndex
-
-
-STRATEGIES = {
-    "template_dedup": ("Template-based deduplication", strategy_template_dedup),
-    "semantic": ("Semantic compression", strategy_semantic),
-    "hybrid": ("Hybrid (semantic + template dedup)", strategy_hybrid),
-    "agent": ("Agent-optimized (smart compression)", strategy_agent),
-    "agent_hybrid": ("Agent + template dedup (max compression)", strategy_agent_hybrid),
-}
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: agenttee <logfile> [--output-dir DIR] [--stats]")
+    args = sys.argv[1:]
+
+    if not args:
+        _print_usage()
         sys.exit(1)
 
-    logfile = Path(sys.argv[1])
-    show_stats = "--stats" in sys.argv
+    SUBCOMMANDS = {"serve", "sessions"}
+
+    # Mode 1: MCP server
+    if args[0] == "serve":
+        from .server import run_server
+        run_server()
+        return
+
+    # Mode 2: List sessions
+    if args[0] == "sessions":
+        from . import store
+        sessions = store.list_sessions()
+        if not sessions:
+            print("No sessions. Pipe output through agenttee to create one:")
+            print("  some_command | agenttee --name myservice")
+            return
+        for s in sessions:
+            status = "ACTIVE" if s.active else "done"
+            print(f"  {s.name:<20s} [{status}]  {s.line_count:>6d} lines  {s.byte_count:>8d} bytes")
+        return
+
+    # Mode 3: File analysis
+    if Path(args[0]).exists():
+        _run_file_analysis(args)
+        return
+
+    # Mode 4: Pipe capture (stdin is piped, and not a known subcommand)
+    if not sys.stdin.isatty() and args[0] not in SUBCOMMANDS:
+        name = _get_name_arg(args)
+        from .pipe import run_pipe
+        run_pipe(name)
+        return
+
+    _print_usage()
+    sys.exit(1)
+
+
+def _get_name_arg(args: list[str]) -> str:
+    for i, arg in enumerate(args):
+        if arg == "--name" and i + 1 < len(args):
+            return args[i + 1]
+    # Auto-generate name from timestamp
+    import time
+    return f"session-{int(time.time())}"
+
+
+def _print_usage():
+    print("agenttee — log compression for AI agents")
+    print()
+    print("Usage:")
+    print("  some_command | agenttee --name myservice   Capture logs to a session")
+    print("  agenttee serve                             Start MCP server (stdio)")
+    print("  agenttee sessions                          List captured sessions")
+    print("  agenttee <logfile> [--stats]               Analyze a log file")
+    print()
+    print("MCP config (add to cursor settings):")
+    print('  { "mcpServers": { "agenttee": { "command": "uv", "args": ["run", "--directory", "<path>", "agenttee", "serve"] } } }')
+
+
+def _run_file_analysis(args: list[str]):
+    import time as time_mod
+    from .compress import (
+        strategy_template_dedup, strategy_semantic, strategy_hybrid,
+        strategy_agent, strategy_agent_hybrid,
+    )
+    from .templates import TemplateIndex
+
+    STRATEGIES = {
+        "template_dedup": ("Template-based deduplication", strategy_template_dedup),
+        "semantic": ("Semantic compression", strategy_semantic),
+        "hybrid": ("Hybrid (semantic + template dedup)", strategy_hybrid),
+        "agent": ("Agent-optimized (smart compression)", strategy_agent),
+        "agent_hybrid": ("Agent + template dedup (max compression)", strategy_agent_hybrid),
+    }
+
+    logfile = Path(args[0])
+    show_stats = "--stats" in args
 
     output_dir_idx = None
-    for i, arg in enumerate(sys.argv):
-        if arg == "--output-dir" and i + 1 < len(sys.argv):
+    for i, arg in enumerate(args):
+        if arg == "--output-dir" and i + 1 < len(args):
             output_dir_idx = i + 1
-    output_dir = Path(sys.argv[output_dir_idx]) if output_dir_idx else logfile.parent / "output"
+    output_dir = Path(args[output_dir_idx]) if output_dir_idx else logfile.parent / "output"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     raw_lines = logfile.read_text().splitlines()
@@ -37,13 +109,24 @@ def main():
     print()
 
     if show_stats:
-        _print_stats(raw_lines)
+        idx = TemplateIndex()
+        idx.ingest(raw_lines)
+        stats = idx.stats()
+        print(f"Template Analysis:")
+        print(f"  Total lines:       {stats['total_lines']}")
+        print(f"  Unique templates:  {stats['unique_templates']}")
+        print(f"  Top 10 cover:      {stats['top10_cover_pct']}% of all lines")
+        print()
+        print(f"  Top templates:")
+        for sig, count, rep in stats["top10"]:
+            pct = count / stats['total_lines'] * 100
+            print(f"    {count:5d} ({pct:5.1f}%)  {sig[:40]:<40s}  {rep[:60]}")
         print()
 
     for name, (desc, fn) in STRATEGIES.items():
-        t0 = time.perf_counter()
+        t0 = time_mod.perf_counter()
         compressed = fn(raw_lines)
-        elapsed = time.perf_counter() - t0
+        elapsed = time_mod.perf_counter() - t0
 
         out_path = output_dir / f"{name}.log"
         out_path.write_text("\n".join(compressed) + "\n")
@@ -57,22 +140,6 @@ def main():
         print(f"    Output: {out_path} ({compressed_bytes:,} bytes)")
         print(f"    Time: {elapsed:.2f}s")
         print()
-
-
-def _print_stats(lines: list[str]):
-    idx = TemplateIndex()
-    idx.ingest(lines)
-    stats = idx.stats()
-
-    print(f"Template Analysis:")
-    print(f"  Total lines:       {stats['total_lines']}")
-    print(f"  Unique templates:  {stats['unique_templates']}")
-    print(f"  Top 10 cover:      {stats['top10_cover_pct']}% of all lines")
-    print()
-    print(f"  Top templates:")
-    for sig, count, rep in stats["top10"]:
-        pct = count / stats['total_lines'] * 100
-        print(f"    {count:5d} ({pct:5.1f}%)  {sig[:40]:<40s}  {rep[:60]}")
 
 
 if __name__ == "__main__":

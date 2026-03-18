@@ -4,7 +4,12 @@ version = "0.1.0"
 description = "Log compression for AI agents — like tee, but smart about what matters"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "mcp[cli]>=1.26.0",
+]
 
 [project.scripts]
 agenttee = "agenttee.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agenttee*"]
