@@ -13,3 +13,8 @@ agenttee = "agenttee.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["agenttee*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

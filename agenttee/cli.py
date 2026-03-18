@@ -60,7 +60,35 @@ def _get_name_arg(args: list[str]) -> str:
     for i, arg in enumerate(args):
         if arg == "--name" and i + 1 < len(args):
             return args[i + 1]
-    # Auto-generate name from timestamp
+    return _auto_name()
+
+
+def _auto_name() -> str:
+    """Derive a session name from context: parent command, then cwd basename."""
+    import subprocess
+    ppid = os.getppid()
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(ppid), "-o", "command="],
+            capture_output=True, text=True, timeout=2,
+        )
+        cmd = result.stdout.strip()
+        if cmd:
+            # Extract the meaningful part: first non-shell token
+            parts = cmd.split("|")[0].strip().split()
+            for part in parts:
+                base = Path(part).stem
+                if base not in ("bash", "zsh", "sh", "fish", "env", "noglob", "uv", "python", "python3", "node", "npm", "npx"):
+                    # Sanitize for filesystem
+                    clean = "".join(c if c.isalnum() or c in "-_." else "-" for c in base)
+                    return clean[:40]
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+
+    cwd = Path.cwd().name
+    if cwd:
+        return cwd[:40]
+
     import time
     return f"session-{int(time.time())}"
 
@@ -70,6 +98,7 @@ def _print_usage():
     print()
     print("Usage:")
     print("  some_command | agenttee --name myservice   Capture logs to a session")
+    print("  some_command | agenttee                    Auto-names from command/cwd")
     print("  agenttee serve                             Start MCP server (stdio)")
     print("  agenttee sessions                          List captured sessions")
     print("  agenttee <logfile> [--stats]               Analyze a log file")

@@ -416,6 +416,81 @@ def strategy_agent_hybrid(lines: list[str]) -> list[str]:
     return pass2
 
 
+def strategy_conservative(lines: list[str]) -> list[str]:
+    """
+    Conservative compression — keeps almost everything, only collapses the
+    most obvious noise: long identical-line runs, progress bars, and docker
+    layer chatter. Good when you want detail but not raw verbosity.
+    """
+    cleaned = [strip_ansi(line).strip() for line in lines]
+    output = []
+    i = 0
+
+    while i < len(cleaned):
+        line = cleaned[i]
+
+        if not line:
+            i += 1
+            continue
+
+        # Collapse webpack progress (50+ lines of percentage updates)
+        if line.startswith('<s> [webpack.Progress]'):
+            start_i = i
+            while i < len(cleaned) and cleaned[i].startswith('<s> [webpack.Progress]'):
+                i += 1
+            count = i - start_i
+            if count > 5:
+                output.append(cleaned[start_i])
+                output.append(f"  ... ({count - 2} webpack progress updates) ...")
+                output.append(cleaned[i - 1])
+            else:
+                output.extend(cleaned[start_i:i])
+            continue
+
+        # Collapse docker layer lines (only if many)
+        if re.match(r'^[0-9a-f]{12}: \w+', line):
+            start_i = i
+            while i < len(cleaned) and re.match(r'^[0-9a-f]{12}:', cleaned[i]):
+                i += 1
+            count = i - start_i
+            if count > 10:
+                output.append(cleaned[start_i])
+                output.append(f"  ... ({count - 2} docker layer status lines) ...")
+                output.append(cleaned[i - 1])
+            else:
+                output.extend(cleaned[start_i:i])
+            continue
+
+        # Collapse only long runs of truly identical lines (>3)
+        if i + 1 < len(cleaned):
+            run_count = 1
+            while i + run_count < len(cleaned) and cleaned[i + run_count] == line:
+                run_count += 1
+            if run_count > 3:
+                output.append(line)
+                output.append(f"  ↑ repeated {run_count} times")
+                i += run_count
+                continue
+
+        output.append(line)
+        i += 1
+
+    return output
+
+
+STRATEGIES = {
+    "conservative": strategy_conservative,
+    "compact": strategy_agent_hybrid,
+    "aggressive": strategy_agent_hybrid,
+}
+
+
+def compress(lines: list[str], mode: str = "compact") -> list[str]:
+    """Compress log lines using the named mode."""
+    fn = STRATEGIES.get(mode, strategy_agent_hybrid)
+    return fn(lines)
+
+
 def _normalize_msg(msg: str) -> str:
     """Normalize a structured log message for grouping — strip variable parts."""
     msg = re.sub(r'tunacuma/\S+', '<service>', msg)

@@ -7,15 +7,20 @@ Tools:
   - tail: get latest lines from a session (live tailing)
   - search: regex search across one or all sessions
   - get_stats: template analysis for a session
+  - get_timeline: interleave multiple sessions by wall-clock time
+  - diff_sessions: compare two sessions or two runs of the same session
 """
 
+import difflib
 import re
 import time
 
 from mcp.server.fastmcp import FastMCP
 
 from . import store
-from .compress import strategy_agent_hybrid, strategy_agent
+from .compress import (
+    strategy_agent_hybrid, strategy_agent, strategy_conservative, compress,
+)
 from .templates import TemplateIndex
 from .tokenizer import strip_ansi
 
@@ -26,7 +31,8 @@ mcp = FastMCP(
         "to capture sessions (e.g., `my_server | agenttee --name api`). "
         "Use these tools to read, search, and analyze the captured logs. "
         "Logs are automatically compressed to save context. "
-        "Use `list_sessions` first to see what's available."
+        "Use `list_sessions` first to see what's available. "
+        "Use `diff_sessions` to compare logs between two runs."
     ),
 )
 
@@ -55,7 +61,7 @@ def list_sessions() -> str:
 @mcp.tool()
 def get_logs(
     session: str,
-    compressed: bool = True,
+    mode: str = "compact",
     head: int | None = None,
     offset: int = 0,
 ) -> str:
@@ -63,30 +69,31 @@ def get_logs(
 
     Args:
         session: Session name (from list_sessions)
-        compressed: If True (default), returns agent-optimized compressed logs.
-                   If False, returns raw logs (ANSI stripped).
+        mode: Compression mode:
+              "compact" (default) — aggressive compression, best for overview
+              "conservative" — light compression, keeps more detail
+              "raw" — no compression, ANSI stripped
         head: Max number of lines to return. Defaults to all.
         offset: Skip this many lines from the start (for pagination).
 
     Returns compressed logs by default — dramatically fewer lines while
-    preserving all meaningful information. Use compressed=False only when
-    you need exact raw output.
+    preserving all meaningful information.
     """
     raw = store.read_lines(session)
     if not raw:
         return f"Session '{session}' not found or empty."
 
-    if compressed:
-        lines = strategy_agent_hybrid(raw)
-    else:
+    if mode == "raw":
         lines = [strip_ansi(l).strip() for l in raw]
+    else:
+        lines = compress(raw, mode)
 
     if offset:
         lines = lines[offset:]
     if head:
         lines = lines[:head]
 
-    header = f"[{session}] {'compressed' if compressed else 'raw'}: {len(lines)} lines"
+    header = f"[{session}] {mode}: {len(lines)} lines"
     if offset:
         header += f" (offset={offset})"
     return header + "\n" + "\n".join(lines)
@@ -229,16 +236,17 @@ def get_timeline(
     compressed: bool = True,
     tail_lines: int | None = None,
 ) -> str:
-    """Get an interleaved timeline from multiple sessions.
+    """Get a time-sorted interleaved view from multiple sessions.
 
-    Useful for seeing how two services interact — e.g., an API server and a
-    worker processing requests. Lines are prefixed with the session name.
+    Lines are merged by their real wall-clock ingestion timestamps, so you
+    can trace the actual order of events across services (e.g., API request
+    hitting the worker).
 
     Args:
         sessions: List of session names to interleave
         grep: Optional regex filter
         compressed: Compress each session's output first (default True)
-        tail_lines: Only show the last N lines from each session
+        tail_lines: Only show the last N lines from each session before merging
     """
     regex = None
     if grep:
@@ -247,30 +255,101 @@ def get_timeline(
         except re.error as e:
             return f"Invalid regex: {e}"
 
-    all_lines = []
+    all_tl: list[store.TimestampedLine] = []
     for sname in sessions:
-        raw = store.read_lines(sname)
-        if not raw:
+        tlines = store.read_timestamped(sname)
+        if not tlines:
             continue
 
         if compressed:
-            lines = strategy_agent_hybrid(raw)
+            texts = [tl.text for tl in tlines]
+            compressed_texts = strategy_agent_hybrid(texts)
+            # Map compressed lines back to timestamps using best-effort matching
+            # Since compression changes line count, use a simple heuristic:
+            # distribute timestamps proportionally
+            if tlines and compressed_texts:
+                ratio = len(tlines) / len(compressed_texts)
+                for j, ct in enumerate(compressed_texts):
+                    src_idx = min(int(j * ratio), len(tlines) - 1)
+                    tl = store.TimestampedLine(
+                        ts=tlines[src_idx].ts, text=ct, session=sname,
+                    )
+                    all_tl.append(tl)
         else:
-            lines = [strip_ansi(l).strip() for l in raw]
+            for tl in tlines:
+                tl.text = strip_ansi(tl.text).strip()
+                all_tl.append(tl)
 
         if tail_lines:
-            lines = lines[-tail_lines:]
+            # Only keep the last N from this session
+            session_lines = [tl for tl in all_tl if tl.session == sname]
+            other_lines = [tl for tl in all_tl if tl.session != sname]
+            all_tl = other_lines + session_lines[-tail_lines:]
 
-        for line in lines:
-            if regex and not regex.search(line):
-                continue
-            all_lines.append(f"[{sname}] {line}")
+    all_tl.sort(key=lambda tl: tl.ts)
 
-    if not all_lines:
+    output_lines = []
+    for tl in all_tl:
+        line = f"[{tl.session}] {tl.text}"
+        if regex and not regex.search(line):
+            continue
+        output_lines.append(line)
+
+    if not output_lines:
         return f"No output from sessions: {', '.join(sessions)}"
 
-    header = f"Timeline: {', '.join(sessions)} ({len(all_lines)} lines)"
-    return header + "\n" + "\n".join(all_lines)
+    header = f"Timeline: {', '.join(sessions)} ({len(output_lines)} lines, sorted by wall-clock time)"
+    return header + "\n" + "\n".join(output_lines)
+
+
+@mcp.tool()
+def diff_sessions(
+    session_a: str,
+    session_b: str,
+    mode: str = "compact",
+    context: int = 3,
+) -> str:
+    """Compare logs between two sessions (or two runs of the same service).
+
+    Shows a unified diff of compressed logs so you can see what changed
+    between runs — useful for comparing before/after a code change,
+    spotting new errors, or seeing what a fix removed.
+
+    Args:
+        session_a: First session (the "before")
+        session_b: Second session (the "after")
+        mode: Compression mode for both sides: "compact", "conservative", "raw"
+        context: Diff context lines (default 3)
+    """
+    raw_a = store.read_lines(session_a)
+    raw_b = store.read_lines(session_b)
+
+    if not raw_a:
+        return f"Session '{session_a}' not found or empty."
+    if not raw_b:
+        return f"Session '{session_b}' not found or empty."
+
+    if mode == "raw":
+        lines_a = [strip_ansi(l).strip() for l in raw_a]
+        lines_b = [strip_ansi(l).strip() for l in raw_b]
+    else:
+        lines_a = compress(raw_a, mode)
+        lines_b = compress(raw_b, mode)
+
+    diff = list(difflib.unified_diff(
+        lines_a, lines_b,
+        fromfile=session_a, tofile=session_b,
+        n=context, lineterm="",
+    ))
+
+    if not diff:
+        return f"No differences between '{session_a}' and '{session_b}' (mode={mode})."
+
+    stats_add = sum(1 for l in diff if l.startswith("+") and not l.startswith("+++"))
+    stats_del = sum(1 for l in diff if l.startswith("-") and not l.startswith("---"))
+
+    header = f"Diff: {session_a} → {session_b} (mode={mode}, +{stats_add} -{stats_del})"
+    return header + "\n" + "\n".join(diff)
 
 
 def _format_age(timestamp: float) -> str:
