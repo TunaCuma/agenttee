@@ -104,7 +104,7 @@ def _print_usage():
     print("  agenttee <logfile> [--stats]               Analyze a log file")
     print()
     print("MCP config (add to cursor settings):")
-    print('  { "mcpServers": { "agenttee": { "command": "uv", "args": ["run", "--directory", "<path>", "agenttee", "serve"] } } }')
+    print('  { "mcpServers": { "agenttee": { "command": "agenttee", "args": ["serve"] } } }')
 
 
 def _run_file_analysis(args: list[str]):

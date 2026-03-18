@@ -17,10 +17,11 @@ agenttee sits between your command and your terminal. It passes everything throu
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/yourname/agenttee.git
-cd agenttee
-uv sync
+git clone https://github.com/TunaCuma/agenttee.git
+uv tool install -e ./agenttee
 ```
+
+This gives you a global `agenttee` command. Since it's an editable install, source changes take effect immediately.
 
 ## Quick Start
 
@@ -28,10 +29,10 @@ uv sync
 
 ```bash
 # Explicit name
-my_server | uv run agenttee --name api
+my_server | agenttee --name api
 
 # Auto-names from the command or working directory
-docker compose up | uv run agenttee
+docker compose up | agenttee
 ```
 
 ### 2. Add the MCP server to your editor
@@ -42,8 +43,8 @@ docker compose up | uv run agenttee
 {
   "mcpServers": {
     "agenttee": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/agenttee", "agenttee", "serve"]
+      "command": "agenttee",
+      "args": ["serve"]
     }
   }
 }
@@ -53,15 +54,15 @@ docker compose up | uv run agenttee
 
 The agent now has access to these tools:
 
-| Tool | What it does |
-|---|---|
-| `list_sessions` | Show all captured sessions with status, line count, size |
-| `get_logs` | Read logs with compression mode: `compact`, `conservative`, or `raw` |
-| `tail` | Get the latest N lines (useful for active sessions) |
-| `search` | Regex search across one or all sessions with context |
-| `get_stats` | Template analysis — understand log structure and repetition |
-| `get_timeline` | Interleave multiple sessions by wall-clock time |
-| `diff_sessions` | Unified diff between two sessions (compressed) |
+| Tool            | What it does                                                         |
+| --------------- | -------------------------------------------------------------------- |
+| `list_sessions` | Show all captured sessions with status, line count, size             |
+| `get_logs`      | Read logs with compression mode: `compact`, `conservative`, or `raw` |
+| `tail`          | Get the latest N lines (useful for active sessions)                  |
+| `search`        | Regex search across one or all sessions with context                 |
+| `get_stats`     | Template analysis — understand log structure and repetition          |
+| `get_timeline`  | Interleave multiple sessions by wall-clock time                      |
+| `diff_sessions` | Unified diff between two sessions (compressed)                       |
 
 ## Features
 
@@ -148,13 +149,15 @@ IDEAS.md          # Future use cases and feature ideas
 ## Development
 
 ```bash
+git clone https://github.com/TunaCuma/agenttee.git
+cd agenttee
 uv sync
 
 # Run tests
 uv run pytest tests/ -v
 
 # Run file analysis (without MCP)
-uv run agenttee some_logfile.log --stats
+agenttee some_logfile.log --stats
 ```
 
 ## License
