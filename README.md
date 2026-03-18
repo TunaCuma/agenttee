@@ -63,6 +63,7 @@ The agent now has access to these tools:
 | `get_stats`     | Template analysis — understand log structure and repetition          |
 | `get_timeline`  | Interleave multiple sessions by wall-clock time                      |
 | `diff_sessions` | Unified diff between two sessions (compressed)                       |
+| `get_traces`    | Retrieve trace lines you added with the `AGENTTEE_TRACE` keyword     |
 
 ## Features
 
@@ -95,6 +96,17 @@ Run your service, capture as `run1`. Make a change, run again as `run2`. The age
 ### Auto-naming
 
 If you don't pass `--name`, agenttee detects the parent process command (e.g., `django` from `python manage.py runserver`) or falls back to the working directory name. No need to think about session names for quick captures.
+
+### Tracing
+
+Add `AGENTTEE_TRACE` print statements to your code and pull just those lines out of the noise:
+
+```python
+print(f"AGENTTEE_TRACE [checkout] user={user.id} total={cart.total}")
+print(f"AGENTTEE_TRACE [db] query took {elapsed}ms rows={count}")
+```
+
+The agent calls `get_traces()` to see only trace output, or `get_traces(tag="db")` to filter by tag. Use `context=2` to include surrounding log lines for each hit.
 
 ### Cross-session search
 
@@ -140,7 +152,7 @@ agenttee/
   compress.py     # All compression strategies
   store.py        # Session storage (~/.agenttee/sessions/)
   pipe.py         # stdin capture with pass-through
-  server.py       # MCP server (7 tools)
+  server.py       # MCP server (8 tools)
   cli.py          # CLI entry point
 tests/            # 70 tests
 IDEAS.md          # Future use cases and feature ideas
