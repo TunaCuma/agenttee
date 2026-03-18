@@ -15,11 +15,16 @@ from pathlib import Path
 def main():
     args = sys.argv[1:]
 
+    # Pipe capture — stdin is piped, no subcommand given
+    if not sys.stdin.isatty() and (not args or args[0] not in ("serve", "sessions")):
+        name = _get_name_arg(args)
+        from .pipe import run_pipe
+        run_pipe(name)
+        return
+
     if not args:
         _print_usage()
         sys.exit(1)
-
-    SUBCOMMANDS = {"serve", "sessions"}
 
     # Mode 1: MCP server
     if args[0] == "serve":
@@ -43,13 +48,6 @@ def main():
     # Mode 3: File analysis
     if Path(args[0]).exists():
         _run_file_analysis(args)
-        return
-
-    # Mode 4: Pipe capture (stdin is piped, and not a known subcommand)
-    if not sys.stdin.isatty() and args[0] not in SUBCOMMANDS:
-        name = _get_name_arg(args)
-        from .pipe import run_pipe
-        run_pipe(name)
         return
 
     _print_usage()
