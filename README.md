@@ -14,14 +14,21 @@ agenttee sits between your command and your terminal. It passes everything throu
 
 ## Install
 
-Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+Requires Python 3.12+.
+
+```bash
+git clone https://github.com/TunaCuma/agenttee.git
+pip install ./agenttee
+```
+
+Or with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/TunaCuma/agenttee.git
 uv tool install -e ./agenttee
 ```
 
-This gives you a global `agenttee` command. Since it's an editable install, source changes take effect immediately.
+After the installation you will have a global `agenttee` command.
 
 ## Quick Start
 
