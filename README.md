@@ -108,6 +108,26 @@ print(f"AGENTTEE_TRACE [db] query took {elapsed}ms rows={count}")
 
 The agent calls `get_traces()` to see only trace output, or `get_traces(tag="db")` to filter by tag. Use `context=2` to include surrounding log lines for each hit.
 
+### CI log debugging
+
+Pipe `gh run watch` through agenttee to capture CI output as it streams, then let the agent figure out why the build failed — without scrolling through hundreds of lines of install noise:
+
+```bash
+gh run watch 12345 | agenttee --name ci
+```
+
+The agent calls `get_logs("ci")` and gets a compressed view with dependency installation, progress bars, and repeated linter output collapsed down to the actual failures. For flaky tests, capture passing and failing runs as separate sessions and diff them:
+
+```bash
+# First run
+gh run watch 12345 | agenttee --name ci-run1
+
+# Second run after a change
+gh run watch 12350 | agenttee --name ci-run2
+```
+
+Then `diff_sessions("ci-run1", "ci-run2")` shows exactly what changed between the two runs.
+
 ### Cross-session search
 
 `search("connection refused")` scans all sessions at once with context lines. Useful during incidents when you're running multiple services and need to find which one is failing.

@@ -26,14 +26,59 @@ from .tokenizer import strip_ansi
 
 mcp = FastMCP(
     "agenttee",
-    instructions=(
-        "Log compression server. Users pipe command output through `agenttee` "
-        "to capture sessions (e.g., `my_server | agenttee --name api`). "
-        "Use these tools to read, search, and analyze the captured logs. "
-        "Logs are automatically compressed to save context. "
-        "Use `list_sessions` first to see what's available. "
-        "Use `diff_sessions` to compare logs between two runs."
-    ),
+    instructions="""\
+Log compression server for debugging. Command outputs should be piped through
+`agenttee` to capture sessions (e.g., `my_server | agenttee --name api`).
+Logs are automatically compressed to save context (97%+ reduction).
+
+## Debugging workflow
+
+1. **Always check sessions first.** Call `list_sessions` at the start of any
+   debugging task. If relevant sessions exist, use them before asking the user
+   to reproduce anything.
+
+2. **Suggest capturing when there are no sessions.** If the user is debugging
+   but has no captured logs, do yourself or suggest piping through agenttee:
+     `command | agenttee --name meaningful-name`
+   Use short, descriptive names (e.g., `api`, `worker`, `test-auth`).
+
+3. **Start with `get_logs` (compact mode).** This gives you the full picture
+   with noise removed. Switch to `conservative` or `raw` only if you need
+   more detail around a specific area.
+
+4. **Use `tail` for active sessions.** When a service is still running and
+   the user reports a new issue, `tail` gives you the latest output without
+   loading the full history.
+
+5. **Use `search` to find errors across all sessions.** Patterns like
+   `error|exception|traceback|failed|panic|fatal` across all sessions
+   quickly locate problems. Use `context=3` to see surrounding lines.
+
+6. **Compare before/after with `diff_sessions`.** When there is a fix
+   and re-runs, diff the old and new sessions to compare behaviour change.
+
+7. **Use AGENTTEE_TRACE for instrumentation.** When you add debug prints to
+   the user's code, prefix them with AGENTTEE_TRACE so `get_traces` can
+   extract just your instrumentation from the noise:
+     `print(f"AGENTTEE_TRACE [tag] var={value}")`
+   Use bracket tags like [auth], [db], [request] to organize traces.
+
+8. **Use `get_timeline` for multi-service issues.** When debugging across
+   services (e.g., API + worker), timeline gives a unified chronological
+   view sorted by wall-clock time.
+
+9. **Use `get_stats` to understand noisy logs.** If logs are large, stats
+   reveal the log structure -- which patterns dominate, how repetitive the
+   output is -- helping you decide what to search for.
+
+10. **CI log debugging.** When a CI run fails, pipe `gh run watch` through
+    agenttee to capture the output:
+      `gh run watch <run-id> | agenttee --name ci-run1`
+    Compression strips dependency installation, progress bars, and repeated
+    linter output down to the actual failures. To debug flaky tests or
+    verify a fix, capture multiple runs and diff them:
+      `diff_sessions("ci-run1", "ci-run2")`
+""",
 )
 
 
